@@ -14,7 +14,10 @@ expected=next(line.split()[0] for line in checks.splitlines() if line.split()[-1
 root=pathlib.Path('/opt/nezha');root.mkdir(exist_ok=True)
 binary=root/'agent.new'
 with urllib.request.urlopen(base+filename,timeout=90) as r,open(binary,'wb') as f:shutil.copyfileobj(r,f)
-if hashlib.file_digest(open(binary,'rb'),'sha256').hexdigest()!=expected:raise SystemExit('文件校验失败')
+digest=hashlib.sha256()
+with open(binary,'rb') as f:
+ for chunk in iter(lambda:f.read(1024*1024),b''):digest.update(chunk)
+if digest.hexdigest()!=expected:raise SystemExit('文件校验失败')
 conf=pathlib.Path('/etc/nezha/agent.yaml');conf.parent.mkdir(mode=0o750,exist_ok=True)
 if not conf.exists():
  with open('/dev/tty','r+') as tty:
@@ -45,5 +48,5 @@ WantedBy=multi-user.target
 subprocess.run(['systemctl','daemon-reload'],check=True)
 subprocess.run(['systemctl','enable','nezha-agent'],check=True)
 subprocess.run(['systemctl','restart','nezha-agent'],check=True)
-print('探针已启动。返回状态站服务器，输入 x-status，选择“接入已安装探针的节点”。')
+print('探针已启动。在状态站哪吒后台查看并编辑节点名称、公开状态和套餐。')
 PY
