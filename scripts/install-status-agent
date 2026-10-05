@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+[[ ${EUID} -eq 0 ]] || { echo '请使用 sudo 执行'; exit 1; }
+command -v python3 >/dev/null || { echo '请先执行 apt update && apt install -y python3 ca-certificates'; exit 1; }
+python3 - <<'PY'
+import getpass,hashlib,json,os,pathlib,platform,shutil,subprocess,urllib.request,uuid
+os.umask(0o077)
+arch={'x86_64':'amd64','aarch64':'arm64'}.get(platform.machine())
+if not arch:raise SystemExit('仅支持 Linux amd64 / arm64')
+base='https://github.com/moment-ge/agent/releases/download/status-20261005.1/'
+filename='nezha-agent-linux-'+arch
+with urllib.request.urlopen(base+'SHA256SUMS',timeout=30) as r:checks=r.read(16384).decode()
+expected=next(line.split()[0] for line in checks.splitlines() if line.split()[-1]==filename)
+root=pathlib.Path('/opt/nezha');root.mkdir(exist_ok=True)
+binary=root/'agent.new'
+with urllib.request.urlopen(base+filename,timeout=90) as r,open(binary,'wb') as f:shutil.copyfileobj(r,f)
+if hashlib.file_digest(open(binary,'rb'),'sha256').hexdigest()!=expected:raise SystemExit('文件校验失败')
+conf=pathlib.Path('/etc/nezha/agent.yaml');conf.parent.mkdir(mode=0o750,exist_ok=True)
+if not conf.exists():
+ with open('/dev/tty','r+') as tty:
+  tty.write('状态站连接地址 [status.huckge.com:443]: ');tty.flush()
+  host=tty.readline().strip() or 'status.huckge.com:443'
+ secret=getpass.getpass('探针连接密钥（在主服务器 x-status 菜单中查看）: ')
+ if not secret:raise SystemExit('密钥不能为空')
+ routes=json.loads(subprocess.check_output(['ip','-j','route','get','1.1.1.1']))
+ settings={'server':host,'tls':True,'insecure_tls':False,'client_secret':secret,'uuid':str(uuid.uuid4()),
+  'disable_auto_update':True,'disable_force_update':True,'disable_command_execute':True,'disable_nat':True,
+  'report_delay':3,'hard_drive_partition_allowlist':['/'],'nic_allowlist':{routes[0]['dev']:True}}
+ conf.write_text(json.dumps(settings));conf.chmod(0o600)
+if (root/'agent').exists():shutil.copy2(root/'agent',root/'agent.previous')
+binary.chmod(0o755);os.replace(binary,root/'agent')
+unit=pathlib.Path('/etc/systemd/system/nezha-agent.service')
+unit.write_text('''[Unit]
+Description=Nezha system and carrier probe agent
+After=network-online.target
+Wants=network-online.target
+[Service]
+ExecStart=/opt/nezha/agent -c /etc/nezha/agent.yaml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+[Install]
+WantedBy=multi-user.target
+''');unit.chmod(0o644)
+subprocess.run(['systemctl','daemon-reload'],check=True)
+subprocess.run(['systemctl','enable','nezha-agent'],check=True)
+subprocess.run(['systemctl','restart','nezha-agent'],check=True)
+print('探针已启动。返回状态站服务器，输入 x-status，选择“接入已安装探针的节点”。')
+PY

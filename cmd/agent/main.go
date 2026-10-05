@@ -727,13 +727,7 @@ func handleIcmpPingTaskWithConfig(gates taskFeatureGates, task *pb.Task, result 
 		err = pinger.Run() // Blocks until finished.
 	}
 	if err == nil {
-		stat := pinger.Statistics()
-		if stat.PacketsRecv == 0 {
-			result.Data = "pockets recv 0"
-			return
-		}
-		result.Delay = float32(stat.AvgRtt.Microseconds()) / 1000.0
-		result.Successful = true
+		applyICMPStatistics(result, pinger.Statistics())
 	} else {
 		result.Data = err.Error()
 	}
